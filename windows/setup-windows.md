@@ -33,7 +33,7 @@ wsl --install
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-.\setup-wsl-cluster-network.ps1
+.\setup-windows.ps1
 ```
 
 WSL 설치·재부팅·최초 사용자 설정이 완료된 뒤에만 이 스크립트를 실행하세요. 조건이 충족되지 않으면 스크립트가 오류 메시지를 출력하고 중단합니다.
