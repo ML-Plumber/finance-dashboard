@@ -1,17 +1,26 @@
 #requires -RunAsAdministrator
-<#!
-Windows-side WSL2 cluster network setup.
-Enter one cluster IP per line and type EOF to finish.
+<#
+Windows firewall rule setup for cluster IPs and ports.
+This script does not install, configure, start, stop, or inspect WSL.
+Enter one cluster IP per line and type EOF to finish, then enter TCP/UDP ports.
 #>
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$WINDOWS_RULE_PREFIX = 'MLOps-Cluster-Internal'
+$HYPERV_RULE_PREFIX = 'WSL-MLOps-Cluster-Internal'
+$LEGACY_WINDOWS_RULE_NAME = 'MLOps-Cluster-Internal'
+$LEGACY_HYPERV_RULE_NAME = 'WSL-MLOps-Cluster-Internal'
+$WSL_CREATOR_ID = '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'
+$RULE_PROTOCOLS = @('TCP', 'UDP')
+$RULE_DIRECTIONS = @('Inbound', 'Outbound')
+
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw '관리자 권한 PowerShell에서 실행해야 합니다.'
+        throw 'Run this script in an elevated PowerShell session.'
     }
 }
 
@@ -27,7 +36,7 @@ function Read-ClusterIps {
 
         $parsedIp = $null
         if (-not [System.Net.IPAddress]::TryParse($value, [ref]$parsedIp)) {
-            Write-Warning "유효한 IP 주소가 아닙니다. 다시 입력하세요: $value"
+            Write-Warning "Invalid IP address. Please try again: $value"
             continue
         }
         if (-not $clusterIps.Contains($parsedIp.ToString())) {
@@ -36,182 +45,182 @@ function Read-ClusterIps {
     }
 
     if ($clusterIps.Count -eq 0) {
-        throw '최소 하나의 Cluster IP가 필요합니다.'
+        throw 'At least one Cluster IP is required.'
     }
     return $clusterIps.ToArray()
 }
 
-function Set-IniKey {
-    param(
-        [AllowEmptyString()][string]$Content,
-        [string]$Section,
-        [string]$Key,
-        [string]$Value
-    )
+function Read-ClusterPorts {
+    $clusterPorts = [System.Collections.Generic.List[string]]::new()
+    Write-Host ''
+    Write-Host '허용할 TCP/UDP 포트를 한 줄에 하나씩 입력하세요. 끝내려면 EOF를 입력하세요.' -ForegroundColor Cyan
 
-    $lines = if ([string]::IsNullOrEmpty($Content)) { @() } else { $Content -split "`r?`n" }
-    $result = [System.Collections.Generic.List[string]]::new()
-    $sectionFound = $false
-    $inTargetSection = $false
-    $keyWritten = $false
-    $escapedKey = [regex]::Escape($Key)
+    while ($true) {
+        $value = (Read-Host 'Port').Trim()
+        if ($value -ieq 'EOF') { break }
+        if ([string]::IsNullOrWhiteSpace($value)) { continue }
 
-    foreach ($line in $lines) {
-        if ($line -match '^\s*\[([^\]]+)\]\s*(?:[;#].*)?$') {
-            if ($inTargetSection -and -not $keyWritten) {
-                [void]$result.Add("$Key=$Value")
-                $keyWritten = $true
-            }
-            $inTargetSection = ($Matches[1] -ieq $Section)
-            if ($inTargetSection) { $sectionFound = $true }
-            [void]$result.Add($line)
+        $parsedPort = 0
+        if (-not [int]::TryParse($value, [ref]$parsedPort) -or $parsedPort -lt 1 -or $parsedPort -gt 65535) {
+            Write-Warning "Invalid port. Enter a number from 1 to 65535: $value"
             continue
         }
-
-        if ($inTargetSection -and $line -match "^\s*$escapedKey\s*=") {
-            if (-not $keyWritten) {
-                [void]$result.Add("$Key=$Value")
-                $keyWritten = $true
-            }
-            continue
+        if (-not $clusterPorts.Contains($parsedPort.ToString())) {
+            [void]$clusterPorts.Add($parsedPort.ToString())
         }
-        [void]$result.Add($line)
     }
 
-    if ($inTargetSection -and -not $keyWritten) {
-        [void]$result.Add("$Key=$Value")
+    if ($clusterPorts.Count -eq 0) {
+        throw 'At least one port is required.'
     }
-    if (-not $sectionFound) {
-        if ($result.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($result[$result.Count - 1])) {
-            [void]$result.Add('')
-        }
-        [void]$result.Add("[$Section]")
-        [void]$result.Add("$Key=$Value")
-    }
-    return ($result -join "`n").TrimEnd() + "`n"
+    return $clusterPorts.ToArray()
 }
 
-function Remove-IniKey {
-    param(
-        [AllowEmptyString()][string]$Content,
-        [string]$Section,
-        [string]$Key
+function Assert-RequiredCommands {
+    $commands = @(
+        'New-NetFirewallRule',
+        'Get-NetFirewallRule',
+        'Remove-NetFirewallRule',
+        'Get-NetFirewallAddressFilter',
+        'Get-NetFirewallPortFilter',
+        'New-NetFirewallHyperVRule',
+        'Get-NetFirewallHyperVRule',
+        'Remove-NetFirewallHyperVRule'
     )
 
-    $lines = if ([string]::IsNullOrEmpty($Content)) { @() } else { $Content -split "`r?`n" }
-    $result = [System.Collections.Generic.List[string]]::new()
-    $inTargetSection = $false
-    $escapedKey = [regex]::Escape($Key)
-
-    foreach ($line in $lines) {
-        if ($line -match '^\s*\[([^\]]+)\]\s*(?:[;#].*)?$') {
-            $inTargetSection = ($Matches[1] -ieq $Section)
-            [void]$result.Add($line)
-            continue
+    foreach ($command in $commands) {
+        if (-not (Get-Command $command -ErrorAction SilentlyContinue)) {
+            throw "Required PowerShell command not found: $command"
         }
-        if ($inTargetSection -and $line -match "^\s*$escapedKey\s*=") {
-            continue
-        }
-        [void]$result.Add($line)
     }
-    return ($result -join "`n").TrimEnd() + "`n"
 }
 
-function Set-ManagedFirewallRule {
+function Set-ManagedWindowsFirewallRule {
     param([string]$Name, [hashtable]$Parameters)
-    Get-NetFirewallRule -Name $Name -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+
+    Get-NetFirewallRule -Name $Name -ErrorAction SilentlyContinue |
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue -Confirm:$false
     New-NetFirewallRule -Name $Name @Parameters | Out-Null
 }
 
 function Set-ManagedHyperVFirewallRule {
     param([string]$Name, [hashtable]$Parameters)
-    Get-NetFirewallHyperVRule -Name $Name -ErrorAction SilentlyContinue | Remove-NetFirewallHyperVRule
+
+    Get-NetFirewallHyperVRule -Name $Name -ErrorAction SilentlyContinue |
+        Remove-NetFirewallHyperVRule -ErrorAction SilentlyContinue -Confirm:$false
     New-NetFirewallHyperVRule -Name $Name @Parameters | Out-Null
+}
+
+function Remove-LegacyRule {
+    param([string]$WindowsRuleName, [string]$HyperVRuleName)
+
+    Get-NetFirewallRule -Name $WindowsRuleName -ErrorAction SilentlyContinue |
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue -Confirm:$false
+    Get-NetFirewallHyperVRule -Name $HyperVRuleName -ErrorAction SilentlyContinue |
+        Remove-NetFirewallHyperVRule -ErrorAction SilentlyContinue -Confirm:$false
+}
+
+function Get-WindowsFirewallRuleSummary {
+    param([string]$Name)
+
+    $rule = Get-NetFirewallRule -Name $Name -ErrorAction Stop
+    $addressFilter = $rule | Get-NetFirewallAddressFilter
+    $portFilter = $rule | Get-NetFirewallPortFilter
+
+    return [PSCustomObject]@{
+        Name = $rule.Name
+        DisplayName = $rule.DisplayName
+        Enabled = $rule.Enabled
+        Direction = $rule.Direction
+        Action = $rule.Action
+        Profile = $rule.Profile
+        Protocol = $portFilter.Protocol
+        LocalPort = $portFilter.LocalPort
+        RemotePort = $portFilter.RemotePort
+        RemoteAddress = $addressFilter.RemoteAddress
+    }
 }
 
 Assert-Administrator
 
 $windowsBuild = [Environment]::OSVersion.Version.Build
 if ($windowsBuild -lt 22621) {
-    throw 'Mirrored networking과 hostAddressLoopback은 Windows 11 22H2(빌드 22621) 이상이 필요합니다.'
+    throw 'Hyper-V firewall rules require Windows 11 22H2 (build 22621) or later.'
 }
 
-foreach ($command in 'New-NetFirewallRule', 'New-NetFirewallHyperVRule', 'Get-NetFirewallHyperVRule') {
-    if (-not (Get-Command $command -ErrorAction SilentlyContinue)) {
-        throw "필수 PowerShell 명령을 찾을 수 없습니다: $command"
-    }
-}
-
-$wslInstalled = $false
-if (Get-Command wsl.exe -ErrorAction SilentlyContinue) {
-    & wsl.exe --status *> $null
-    $wslInstalled = ($LASTEXITCODE -eq 0)
-}
-if (-not $wslInstalled) {
-    Write-Host 'WSL 설치가 필요합니다. 관리자 PowerShell에서 wsl --install을 실행하고 PC를 재부팅한 후 다시 실행해주세요.' -ForegroundColor Yellow
-    exit 0
-}
+Assert-RequiredCommands
 
 $ClusterIPs = Read-ClusterIps
-$WSL_ID = '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'
+$ClusterPorts = Read-ClusterPorts
 
-# Windows-side global WSL settings. generateHosts is not written to .wslconfig.
-$wslConfigPath = Join-Path $env:USERPROFILE '.wslconfig'
-$wslConfigContent = if (Test-Path $wslConfigPath) { Get-Content -LiteralPath $wslConfigPath -Raw } else { '' }
-$wslConfigContent = Remove-IniKey $wslConfigContent 'network' 'generateHosts'
-$wslConfigContent = Set-IniKey $wslConfigContent 'wsl2' 'networkingMode' 'mirrored'
-$wslConfigContent = Set-IniKey $wslConfigContent 'experimental' 'hostAddressLoopback' 'true'
-if (Test-Path $wslConfigPath) {
-    Copy-Item -LiteralPath $wslConfigPath -Destination "$wslConfigPath.before-mlops.bak" -Force
-}
-Set-Content -LiteralPath $wslConfigPath -Value $wslConfigContent -Encoding utf8
+# Remove the old all-protocol/all-port rules created by earlier versions.
+Remove-LegacyRule $LEGACY_WINDOWS_RULE_NAME $LEGACY_HYPERV_RULE_NAME
 
-# Apply the Windows-side .wslconfig on the next WSL startup.
-wsl.exe --shutdown
-Start-Sleep -Seconds 2
+$windowsRuleNames = @()
+$hyperVRuleNames = @()
 
-Set-ManagedFirewallRule 'MLOps-Cluster-Internal' @{
-    DisplayName = 'MLOps Cluster Internal'
-    Direction = 'Inbound'
-    RemoteAddress = $ClusterIPs
-    Protocol = 'Any'
-    Action = 'Allow'
-    Profile = 'Any'
-}
+foreach ($direction in $RULE_DIRECTIONS) {
+    foreach ($protocol in $RULE_PROTOCOLS) {
+        $suffix = "$protocol-$direction"
+        $windowsRuleName = "$WINDOWS_RULE_PREFIX-$suffix"
+        $hyperVRuleName = "$HYPERV_RULE_PREFIX-$suffix"
 
-Set-ManagedHyperVFirewallRule 'WSL-MLOps-Cluster-Internal' @{
-    DisplayName = 'WSL MLOps Cluster Internal'
-    Direction = 'Inbound'
-    VMCreatorId = $WSL_ID
-    RemoteAddresses = $ClusterIPs
-    Action = 'Allow'
-}
+        $windowsParameters = @{
+            DisplayName = $windowsRuleName
+            Direction = $direction
+            RemoteAddress = $ClusterIPs
+            Protocol = $protocol
+            Action = 'Allow'
+            Profile = 'Any'
+            Enabled = $true
+        }
 
-Write-Host "`n===== 최종 Windows 측 네트워크 설정 =====" -ForegroundColor Green
-Write-Host "WSL Creator ID: $WSL_ID"
-Write-Host "Cluster IPs: $($ClusterIPs -join ', ')"
+        $hyperVParameters = @{
+            DisplayName = $hyperVRuleName
+            Direction = $direction
+            VMCreatorId = $WSL_CREATOR_ID
+            RemoteAddresses = $ClusterIPs
+            Protocol = $protocol
+            Action = 'Allow'
+            Profiles = 'Any'
+            Enabled = 'True'
+        }
 
-Write-Host "`n[.wslconfig] $wslConfigPath"
-Get-Content -LiteralPath $wslConfigPath
+        if ($direction -eq 'Inbound') {
+            # Inbound traffic reaches the local service port.
+            $windowsParameters.LocalPort = $ClusterPorts
+            $hyperVParameters.LocalPorts = $ClusterPorts
+        }
+        else {
+            # Outbound traffic targets the remote cluster service port.
+            $windowsParameters.RemotePort = $ClusterPorts
+            $hyperVParameters.RemotePorts = $ClusterPorts
+        }
 
-Write-Host "`n[Windows Firewall]"
-Get-NetFirewallRule -Name 'MLOps-Cluster-Internal' |
-    Get-NetFirewallAddressFilter |
-    Select-Object InstanceID, RemoteAddress |
-    Format-Table -AutoSize
+        Set-ManagedWindowsFirewallRule $windowsRuleName $windowsParameters
+        Set-ManagedHyperVFirewallRule $hyperVRuleName $hyperVParameters
 
-Write-Host "`n[Hyper-V Firewall]"
-Get-NetFirewallHyperVRule -Name 'WSL-MLOps-Cluster-Internal' |
-    Select-Object Name, DisplayName, Direction, Protocol, RemoteAddresses, VMCreatorId, Action |
-    Format-Table -AutoSize
-
-Write-Host "`n[Cluster IP 연결 확인]"
-$networkResults = foreach ($clusterIp in $ClusterIPs) {
-    [PSCustomObject]@{
-        ClusterIP = $clusterIp
-        Ping = Test-Connection -ComputerName $clusterIp -Count 1 -Quiet -ErrorAction SilentlyContinue
+        $windowsRuleNames += $windowsRuleName
+        $hyperVRuleNames += $hyperVRuleName
     }
 }
-$networkResults | Format-Table -AutoSize
 
-Write-Host "`nWindows 측 기본 네트워크 설정이 완료되었습니다." -ForegroundColor Green
+Write-Host "`n===== 최종 방화벽 규칙 설정 =====" -ForegroundColor Green
+Write-Host "`n[Cluster IP 목록]"
+$ClusterIPs | ForEach-Object { Write-Host "- $_" }
+Write-Host "`n[허용 포트 목록]"
+$ClusterPorts | ForEach-Object { Write-Host "- $_" }
+
+Write-Host "`n[Windows 방화벽 규칙]"
+foreach ($ruleName in $windowsRuleNames) {
+    Get-WindowsFirewallRuleSummary $ruleName | Format-List
+}
+
+Write-Host "`n[Hyper-V 방화벽 규칙]"
+foreach ($ruleName in $hyperVRuleNames) {
+    Get-NetFirewallHyperVRule -Name $ruleName -ErrorAction Stop |
+        Select-Object Name, DisplayName, Enabled, Direction, Protocol, LocalPorts, RemotePorts, RemoteAddresses, Profiles, VMCreatorId, Action |
+        Format-List
+}
+
+Write-Host "`n방화벽 규칙 설정이 완료되었습니다." -ForegroundColor Green
