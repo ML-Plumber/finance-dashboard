@@ -27,7 +27,7 @@ function Assert-Administrator {
 function Read-ClusterIps {
     $clusterIps = [System.Collections.Generic.List[string]]::new()
     Write-Host ''
-    Write-Host '클러스터 IP를 한 줄에 하나씩 입력하세요. 끝내려면 EOF를 입력하세요.' -ForegroundColor Cyan
+    Write-Host 'Enter one Cluster IP per line. Type EOF when finished.' -ForegroundColor Cyan
 
     while ($true) {
         $value = (Read-Host 'Cluster IP').Trim()
@@ -53,7 +53,7 @@ function Read-ClusterIps {
 function Read-ClusterPorts {
     $clusterPorts = [System.Collections.Generic.List[string]]::new()
     Write-Host ''
-    Write-Host '허용할 TCP/UDP 포트를 한 줄에 하나씩 입력하세요. 끝내려면 EOF를 입력하세요.' -ForegroundColor Cyan
+    Write-Host 'Enter one TCP/UDP port per line. Type EOF when finished.' -ForegroundColor Cyan
 
     while ($true) {
         $value = (Read-Host 'Port').Trim()
@@ -172,7 +172,7 @@ foreach ($direction in $RULE_DIRECTIONS) {
             Protocol = $protocol
             Action = 'Allow'
             Profile = 'Any'
-            Enabled = $true
+            Enabled = 'True'
         }
 
         $hyperVParameters = @{
@@ -205,22 +205,22 @@ foreach ($direction in $RULE_DIRECTIONS) {
     }
 }
 
-Write-Host "`n===== 최종 방화벽 규칙 설정 =====" -ForegroundColor Green
-Write-Host "`n[Cluster IP 목록]"
+Write-Host "`n===== Final Firewall Rule Configuration =====" -ForegroundColor Green
+Write-Host "`n[Cluster IPs]"
 $ClusterIPs | ForEach-Object { Write-Host "- $_" }
-Write-Host "`n[허용 포트 목록]"
+Write-Host "`n[Allowed Ports]"
 $ClusterPorts | ForEach-Object { Write-Host "- $_" }
 
-Write-Host "`n[Windows 방화벽 규칙]"
+Write-Host "`n[Windows Firewall Rules]"
 foreach ($ruleName in $windowsRuleNames) {
     Get-WindowsFirewallRuleSummary $ruleName | Format-List
 }
 
-Write-Host "`n[Hyper-V 방화벽 규칙]"
+Write-Host "`n[Hyper-V Firewall Rules]"
 foreach ($ruleName in $hyperVRuleNames) {
     Get-NetFirewallHyperVRule -Name $ruleName -ErrorAction Stop |
         Select-Object Name, DisplayName, Enabled, Direction, Protocol, LocalPorts, RemotePorts, RemoteAddresses, Profiles, VMCreatorId, Action |
         Format-List
 }
 
-Write-Host "`n방화벽 규칙 설정이 완료되었습니다." -ForegroundColor Green
+Write-Host "`nFirewall rule configuration completed successfully." -ForegroundColor Green
