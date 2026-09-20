@@ -96,7 +96,6 @@ wsl --shutdown
 
 - 설치 또는 확인된 공통 패키지
 - SSH 서비스 상태
-- 네트워크 인터페이스와 주요 listening 상태
 - conda 및 Miniforge 설치 상태
 - `/etc/wsl.conf`의 적용 내용
 - Windows `.wslconfig`의 적용 내용

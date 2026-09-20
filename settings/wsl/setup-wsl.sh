@@ -172,7 +172,7 @@ install_miniforge() {
   else
     [[ ! -e "$MINIFORGE_PREFIX" ]] || die "${MINIFORGE_PREFIX} exists but conda is not available there."
 
-    installer_temp="$(mktemp)"
+    installer_temp="$(mktemp --suffix=.sh)"
     TEMP_FILES+=("$installer_temp")
     curl --fail --location --retry 3 --output "$installer_temp" "$MINIFORGE_URL"
     bash "$installer_temp" -b -p "$MINIFORGE_PREFIX"
@@ -271,9 +271,6 @@ print_status() {
     "${SUDO[@]}" service ssh status 2>/dev/null || true
   fi
 
-  printf '\n[Network]\n'
-  ip -brief address
-  ss -tlnp 2>/dev/null || true
 
   printf '\n[Miniforge]\n'
   conda --version
