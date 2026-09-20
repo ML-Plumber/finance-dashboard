@@ -78,10 +78,20 @@ cd ~/finance-dashboard
 
 WSL 설치, Windows 재부팅, 배포판 초기화가 끝난 뒤 관리자 권한 PowerShell에서 실행합니다.
 
+
+- `$env:USERNAME`으로 확인한 값을 cd 명령어 이후에, `username`에 넣어 경로를 수정한 뒤 실행합니다.
+
+```powershell
+$env:USERNAME
+cd Microsoft.PowerShell.Core\FileSystem::\\wsl.localhost\Ubuntu\home\<username>\finance-dashboard\settings\windows
+```
+
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\setup-windows.ps1
 ```
+
+WSL 기본 설정이 아직 완료되지 않았기 때문에 `setup-windows.ps1`을 실행했더라도 곧바로 `ping`으로 포트 연결을 확인할 수는 없습니다. 
 
 스크립트의 상세 전제 조건과 실행 방법은 다음 문서에서 확인합니다.
 
@@ -92,6 +102,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 Windows 설정 스크립트가 끝난 뒤 WSL 터미널에서 실행합니다.
 
 ```bash
+cd ~/finance-dashboard/settings/wsl
 bash setup-wsl.sh
 ```
 
@@ -119,3 +130,49 @@ wsl --shutdown
 | [setup-wsl.md](wsl/setup-wsl.md) | WSL 기본 환경 설정 |
 
 두 스크립트 모두 WSL 설치를 대신하지 않습니다. 새 Windows 환경에서는 반드시 `wsl --install` → Windows 재부팅 → WSL 배포판 초기화 순서를 먼저 완료합니다.
+
+## 7. Kafka 클러스터 설정
+
+Windows와 WSL 기본 설정이 끝난 뒤, Kafka를 사용할 각 WSL 노드에서 다음 순서로 실행한다.
+
+1. Kafka 설정 디렉터리로 이동한다.
+
+   ```bash
+   cd ~/finance-dashboard/settings/clustering/kafka
+   ```
+
+2. Kafka 노드 설치 스크립트를 실행한다.
+
+   ```bash
+   bash setup-kafka-node.sh
+   ```
+
+3. 새 클러스터를 구성하는 경우 생성된 `CLUSTER_ID`와 `directory-id`를 모든 노드에서 공유한다.
+4. `kafka` Conda 환경을 활성화한 뒤, 스크립트가 마지막에 출력한 Kafka 시작 명령을 각 노드에서 실행한다.
+
+스크립트의 상세 동작과 입력값, ID 공유 규칙, WSL 네트워크 주의사항 등의 내용은 다음 문서에서 확인합니다.
+
+- [setup-kafka-node.md](clustering/kafka/setup-kafka-node.md)
+
+## 8. Spark Standalone 노드 설정
+
+Spark를 사용할 각 WSL 노드에서 다음 순서로 실행한다.
+
+1. Spark 설정 디렉터리로 이동한다.
+
+   ```bash
+   cd ~/finance-dashboard/settings/clustering/spark
+   ```
+
+2. Spark 노드 설치 스크립트를 실행한다.
+
+   ```bash
+   bash setup-spark-node.sh
+   ```
+
+3. local IP는 자동으로 감지되며, Master 주소와 포트 및 Worker 자원 설정값을 입력한다.
+4. Master 노드에서는 출력된 Master 시작 명령을, Worker 노드에서는 출력된 Worker 시작 명령을 실행한다.
+5. Master Web UI에서 Master와 Worker의 연결 상태를 확인한다.
+
+스크립트의 상세 동작과 설치 경로 초기화, Conda 버전 확인, `spark-env.sh` 설정 및 실행 방법은 다음 문서에서 확인합니다.
+- [setup-spark-node.md](clustering/spark/setup-spark-node.md)
