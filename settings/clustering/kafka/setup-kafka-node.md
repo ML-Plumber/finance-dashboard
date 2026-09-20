@@ -4,9 +4,9 @@
 
 이 스크립트의 모든 Kafka 작업은 Conda 환경 kafka 안에서 수행됩니다.
 
-- kafka 환경이 없으면 스크립트가 python 3.12와 openjdk 17을 포함한 환경을 먼저 생성합니다.
-- 환경을 생성하거나 기존 환경을 찾은 뒤 kafka 환경을 활성화하고 작업을 수행합니다.
-- Kafka 바이너리 다운로드, UUID 생성, node.properties 작성, KRaft metadata 포맷이 모두 활성화된 환경에서 실행됩니다.
+- kafka 환경이 없으면 스크립트가 `python 3.12`와 `openjdk 17`을 포함한 환경을 먼저 생성합니다.
+- 환경을 생성하거나 기존 환경을 찾은 뒤 `kafka` 환경을 활성화하고 작업을 수행합니다.
+- Kafka 바이너리 다운로드, UUID 생성, `node.properties` 작성, KRaft metadata 포맷이 모두 활성화된 환경에서 실행됩니다.
 
 `setup-kafka-node.sh`은 노드 수가 고정되지 않은 Kafka KRaft 클러스터 설치 스크립트입니다.
 - 같은 스크립트를 모든 WSL 노드에서 한 번씩 실행합니다.
