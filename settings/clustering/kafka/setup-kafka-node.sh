@@ -18,6 +18,15 @@ die() {
     exit 1
 }
 
+print_stage() {
+    local stage_number="$1"
+    local stage_title="$2"
+
+    printf '\n============================================================\n'
+    printf 'STAGE %s: %s\n' "$stage_number" "$stage_title"
+    printf '============================================================\n'
+}
+
 require_command() {
     command -v "$1" >/dev/null 2>&1 || die "필수 명령을 찾을 수 없습니다: $1"
 }
@@ -268,6 +277,7 @@ generate_cluster_ids_if_needed() {
     local i
 
     if [[ "$CLUSTER_ID_MODE" != 'generate' ]]; then
+        printf '입력된 CLUSTER_ID와 directory-id를 사용합니다.\n'
         return
     fi
 
@@ -275,6 +285,7 @@ generate_cluster_ids_if_needed() {
     for ((i = 1; i <= NODE_COUNT; i++)); do
         DIRECTORY_IDS[$i]="$(generate_random_uuid)"
     done
+    printf 'CLUSTER_ID와 모든 directory-id를 자동 생성했습니다.\n'
 }
 
 build_controller_values() {
@@ -404,7 +415,6 @@ print_summary() {
     printf 'conda activate kafka\n'
     printf '\n활성화된 kafka 환경에서 실행할 Kafka 시작 명령:\n'
     printf '%s\n' "$KAFKA_DIR/bin/kafka-server-start.sh $NODE_PROPERTIES"
-    printf '\n/etc/hosts는 수정하지 않았습니다. 모든 노드는 위의 실제 IP를 사용합니다.\n'
 }
 
 main() {
@@ -413,23 +423,35 @@ main() {
         die '이 스크립트는 WSL 내부에서 실행해야 합니다.'
     fi
 
+    print_stage 1 'Conda kafka 환경 준비'
     setup_kafka_conda_environment
 
     for command_name in awk curl grep ip java mktemp sort stat tar tr; do
         require_command "$command_name"
     done
 
+    print_stage 2 '클러스터 입력 정보 수집'
     prompt_node_count
     prompt_cluster_id
     prompt_node_id
     detect_current_ip
     prompt_other_node_ips
     prompt_directory_ids
+
+    print_stage 3 'Kafka 바이너리 다운로드 및 디렉터리 준비'
     download_and_extract_kafka
+
+    print_stage 4 'Cluster ID와 directory-id 준비'
     generate_cluster_ids_if_needed
     build_controller_values
+
+    print_stage 5 'node.properties 작성'
     write_node_properties
+
+    print_stage 6 'KRaft metadata 포맷'
     format_kraft_metadata
+
+    print_stage 7 '환경 변수 저장 및 최종 확인'
     update_bashrc
     print_summary
 }
