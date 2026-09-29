@@ -5,9 +5,10 @@ from typing_extensions import (
 )
 from pymongo import MongoClient
 from data_classes.BsonDocument import BsonDocument
+from my_utils import green_print
 
 class MongoShard :
-    def __init__(self, source_id: int, client: MongoClient, db: str, collection: str) :
+    def __init__(self, source_id: str, client: MongoClient, db: str, collection: str) :
         self.source_id = str(source_id)
         self._client = client
 
@@ -16,16 +17,15 @@ class MongoShard :
         self._db = client[db]
         self._collection = self._db[collection]
 
-        print("===== Connect to mongodb Successfully =====")
-        print(f"database name : {db}")
-        print(f"collection name : {collection}")
+        green_print("===== Connect to mongodb Successfully =====")
+        green_print(f"connected database name : {db}")
+        green_print(f"connected collection name : {collection}")
 
     def read_changes(
             self,
             resume_after: Mapping[str, Any] | None = None,
             cursor_options: dict[str, Any] | None = None,
     ) -> Iterator[BsonDocument]:
-
         if cursor_options is None :
             cursor_options = {
                 "full_document": "updateLookup",

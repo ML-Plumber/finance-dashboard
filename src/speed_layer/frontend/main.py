@@ -1,17 +1,27 @@
 import os
+import sys
 
+CURRENT_PATH = os.path.dirname(os.path.abspath(__file__))
+SRC_DIR = os.path.abspath(os.path.join(CURRENT_PATH, '../../'))
+
+if SRC_DIR not in sys.path :
+    sys.path.insert(0, SRC_DIR)
+
+from dotenv import load_dotenv
+from colorama import init
+from my_utils import red_print
 from MongoShard import MongoShard
-from data_classes import (
-    BsonDocument,
-    NormalizedDocument
+from Normalizer import Normalizer
+from Serializer import Serializer
+from confluent_kafka import Producer
+from pymongo.errors import (
+    ConnectionFailure,
+    PyMongoError,
 )
 
-from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure
-from dotenv import load_dotenv
-from confluent_kafka import Producer
+def get_shard_config() :
+    from pymongo import MongoClient
 
-def get_config() :
     config ={
         'source_id' : os.environ.get("SOURCE_ID"),
         'client' : MongoClient(os.environ.get("MONGO_URL")),
@@ -21,18 +31,36 @@ def get_config() :
     return config
 
 def main() :
+    #initialization 수행
     load_dotenv()
-    config = get_config()
+    init(autoreset=True)
+
+    mongo_config = get_shard_config()
+    producer_config = {'bootstrap.servers': 'localhost:9092'}
     try :
-        mongoshard = MongoShard(**config)
+        # Producing을 위한 각 Instance 생성
+        mongoshard = MongoShard(**mongo_config)
+        normalizer = Normalizer()
+        serializer = Serializer(topic='test_topic', )
+        producer = Producer(producer_config)
     except ConnectionFailure as e :
-        print(f"Network error occured during connection : {e}")
+        red_print(f"Network error occured during connection : {e}")
+        return None
 
-    # CheckPointSaver사용 시 여기서 호출
+    # @@@CheckPointSaver사용 시 여기서 호출@@@
 
-    while True :
-        for raw in mongoshard.read_changes() :
-            print(raw) # BsonDocument(source_id='0', namespace='datalake.bronze', operation_type='insert', document_key={'_id': ObjectId('6abb21420adb1ad7c6257482')}, full_document={'_id': ObjectId('6abb21420adb1ad7c6257482'), 'event_type': 'aggTrade', 'event_time': 1790648642459, 'symbol': 'BTCUSDT', 'trade_id': 4076323231, 'price': '83024.09000000', 'quantity': '0.08416000', 'first_trade_id': 6720823739, 'last_trade_id': 6720823741, 'trade_time': 1790648642459, 'is_buyer_maker': True, 'M': True}, resume_token={'_data': '826ABB2142000000012B042C01002B546E5A1004363B1922266B44CEA54F5C3E11517B3D463C6F7065726174696F6E54797065003C696E736572740046646F63756D656E744B65790046645F696400646ABB21420ADB1AD7C6257482000004'}, cluster_time=Timestamp(1790648642, 1))
+    try :
+        while True :
+            for raw in mongoshard.read_changes() :
+                normalized_document = normalizer.normalize(raw)
+                serialized_data = serializer.serialize(normalized_document)
+                producer.produce(**serialized_data) # header에 manifest data 어떤 식으로 전달할지 고려가 필요함.
+                producer.poll(1)
+    except PyMongoError as e :
+        red_print(f"error occured from change stream")
+
+    producer.flush()
+    del mongoshard
 
 if __name__ == "__main__" :
     main()
